@@ -1,81 +1,110 @@
 from xmlrpc.server import SimpleXMLRPCServer
 import pika
-import threading
+import json # Necessário para enviar os convites estruturados
 
 # Configuração do RabbitMQ
 RABBIT_HOST = 'localhost'
 
 class ServidorChat:
     def __init__(self):
-        # Banco de dados em memória
-        self.usuarios = []       # Lista de nomes
-        self.amigos = {}         # Dicionário { 'joao': ['maria', 'pedro'] }
-        self.status = {}         # Dicionário { 'joao': 'online' }
+        self.usuarios = []
+        self.amigos = {} # { 'joao': ['maria'] }
         
-        # Conexão persistente com RabbitMQ para criar filas e enviar mensagens
         self.connection = pika.BlockingConnection(pika.ConnectionParameters(RABBIT_HOST))
         self.channel = self.connection.channel()
         print("Servidor conectado ao RabbitMQ e pronto via RPC.")
 
-    # --- REQ 7: Criar fila ao entrar ---
     def registrar_usuario(self, nome):
         if nome not in self.usuarios:
             self.usuarios.append(nome)
             self.amigos[nome] = []
-            self.status[nome] = 'offline'
-            
-            # Cria a fila exclusiva para este usuário no RabbitMQ
-            self.channel.queue_declare(queue=f'fila_{nome}', durable=True)
-            print(f"Usuário {nome} registrado e fila 'fila_{nome}' criada.")
+            # Cria a fila do usuário (Durável)
+            self.channel.queue_declare(queue=nome, durable=True)
+            print(f"Usuário {nome} registrado.")
             return True
-        return True # Já existe, só retorna ok
+        return True
 
-    # --- REQ 2: Mudar estado ---
-    def mudar_status(self, nome, novo_status):
-        # status pode ser 'online' ou 'offline'
-        if nome in self.usuarios:
-            self.status[nome] = novo_status
-            print(f"{nome} agora está {novo_status}")
+    # --- NOVA FUNCIONALIDADE: Solicitar Amizade ---
+    def solicitar_amizade(self, eu, nome_amigo):
+        if nome_amigo not in self.usuarios:
+            return "Usuário não encontrado."
+        
+        if nome_amigo in self.amigos.get(eu, []):
+            return "Vocês já são amigos."
+
+        # Envia um "Convite" especial via RabbitMQ para a fila do amigo
+        payload = {
+            "type": "invite",
+            "sender": eu
+        }
+        self.channel.basic_publish(
+            exchange='',
+            routing_key=nome_amigo,
+            body=json.dumps(payload),
+            properties=pika.BasicProperties(delivery_mode=2) # Persistente
+        )
+        return "Solicitação enviada com sucesso!"
+
+    # --- NOVA FUNCIONALIDADE: Aceitar Amizade ---
+    def aceitar_amizade(self, eu, novo_amigo):
+        # Atualiza a lista de amigos no servidor (Recíproco)
+        if eu not in self.amigos: self.amigos[eu] = []
+        if novo_amigo not in self.amigos: self.amigos[novo_amigo] = []
+
+        if novo_amigo not in self.amigos[eu]:
+            self.amigos[eu].append(novo_amigo)
+            self.amigos[novo_amigo].append(eu)
+            
+            # Avisa o solicitante que o pedido foi aceito
+            payload = {
+                "type": "confirmacao",
+                "sender": eu
+            }
+            self.channel.basic_publish(
+                exchange='',
+                routing_key=novo_amigo,
+                body=json.dumps(payload),
+                properties=pika.BasicProperties(delivery_mode=2)
+            )
+            print(f"Amizade formada: {eu} <-> {novo_amigo}")
             return True
         return False
 
-    # --- REQ 8: Gestão de Contatos ---
-    def adicionar_amigo(self, eu, nome_amigo):
-        if eu in self.usuarios and nome_amigo in self.usuarios:
-            if nome_amigo not in self.amigos[eu]:
-                self.amigos[eu].append(nome_amigo)
-                # Adiciona reciprocamente para facilitar teste
-                if eu not in self.amigos[nome_amigo]:
-                    self.amigos[nome_amigo].append(eu)
-                return f"{nome_amigo} adicionado!"
-        return "Erro: Usuário não encontrado."
+    # --- NOVA FUNCIONALIDADE: Remover Amigo ---
+    def remover_amigo(self, eu, ex_amigo):
+        removido = False
+        if eu in self.amigos and ex_amigo in self.amigos[eu]:
+            self.amigos[eu].remove(ex_amigo)
+            removido = True
+        
+        if ex_amigo in self.amigos and eu in self.amigos[ex_amigo]:
+            self.amigos[ex_amigo].remove(eu)
+        
+        if removido:
+            print(f"Amizade desfeita: {eu} -X- {ex_amigo}")
+            return True
+        return False
 
-    def listar_amigos(self, nome):
-        return self.amigos.get(nome, [])
-
-    # --- REQ 3, 4, 5 e 6: Envio de Mensagem ---
     def enviar_mensagem(self, remetente, destinatario, texto):
-        if destinatario not in self.usuarios:
-            return False
+        # (Opcional) Verifica se são amigos antes de enviar
+        if destinatario not in self.amigos.get(remetente, []):
+             # Você pode decidir se bloqueia ou permite envio para não-amigos
+             pass 
+
+        msg_corpo = {
+            "type": "msg",
+            "sender": remetente,
+            "content": texto
+        }
         
-        # Monta a mensagem
-        msg_corpo = f"[{remetente}]: {texto}"
-        
-        # A MÁGICA: Independente se está online ou offline, mandamos para a fila.
-        # Se estiver Online, o cliente consome na hora (Req 3).
-        # Se estiver Offline, fica guardado na fila (Req 4 e 6).
         self.channel.basic_publish(
             exchange='',
-            routing_key=f'fila_{destinatario}',
-            body=msg_corpo,
-            properties=pika.BasicProperties(
-                delivery_mode=2,  # Mensagem persistente
-            )
+            routing_key=destinatario,
+            body=json.dumps(msg_corpo),
+            properties=pika.BasicProperties(delivery_mode=2)
         )
-        print(f"Mensagem de {remetente} enviada para a fila de {destinatario}")
         return True
 
-# Inicializa o Servidor RPC na porta 8000
 server = SimpleXMLRPCServer(("localhost", 8000), allow_none=True)
 server.register_instance(ServidorChat())
 print("Servidor RPC rodando na porta 8000...")
