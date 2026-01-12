@@ -21,7 +21,7 @@ class ChatApp(ctk.CTk):
         self.consume_thread = None
         self.stop_thread = False
 
-        self.title("Mensageiro Rápido (vFinal)")
+        self.title("Mensageiro")
         self.geometry("900x600")
         
         self.grid_columnconfigure(1, weight=1)
@@ -103,7 +103,6 @@ class ChatApp(ctk.CTk):
                         self.after(0, lambda: self.add_contact_local(sender))
                         self.after(0, lambda: self.log_to_chat_system(f"🎉 {sender} aceitou seu pedido!"))
 
-                    # --- CORREÇÃO AQUI: TRATAMENTO DE REMOÇÃO ---
                     elif msg_type == "friend_removed":
                         self.after(0, lambda: self.remove_contact_local(sender))
                         self.after(0, lambda: self.log_to_chat_system(f"🚫 {sender} removeu você da lista de amigos."))
@@ -124,7 +123,7 @@ class ChatApp(ctk.CTk):
         except Exception as e:
             print(f"Erro Thread: {e}")
 
-    # --- Amizade ---
+    # Amizade 
 
     def request_new_friend(self):
         if not self.is_connected: return
@@ -154,7 +153,7 @@ class ChatApp(ctk.CTk):
         if target and target in self.users_list_dropdown:
             if messagebox.askyesno("Remover", f"Remover '{target}'?"):
                 try:
-                    # 1. Avisa o servidor (que vai avisar o amigo)
+                    # 1. Avisa o servidor
                     self.rpc_server.remover_amigo(self.entry_identity.get(), target)
                     # 2. Remove localmente imediatamente
                     self.remove_contact_local(target)
@@ -168,7 +167,6 @@ class ChatApp(ctk.CTk):
             self.user_dropdown.configure(values=self.users_list_dropdown)
             self.user_dropdown.set(nome)
 
-    # --- NOVA FUNÇÃO AUXILIAR ---
     def remove_contact_local(self, nome):
         """Remove o nome da lista visualmente"""
         if nome in self.users_list_dropdown:
@@ -181,7 +179,8 @@ class ChatApp(ctk.CTk):
             else:
                 self.user_dropdown.set("")
 
-    # --- Conexão e Envio ---
+
+    # Conexão e envio
 
     def toggle_connection(self):
         my_id = self.entry_identity.get().strip()

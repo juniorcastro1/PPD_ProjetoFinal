@@ -77,7 +77,6 @@ class ServidorChat:
         if removido:
             print(f"Amizade desfeita: {eu} -X- {ex_amigo}")
             
-            # --- CORREÇÃO AQUI ---
             # Avisa o ex-amigo que ele foi removido para atualizar a UI dele
             payload = {
                 "type": "friend_removed",
@@ -92,7 +91,6 @@ class ServidorChat:
             return True
         return False
 
-    # Mantido para compatibilidade, mas o App usa envio direto agora
     def enviar_mensagem(self, remetente, destinatario, texto):
         pass
 
