@@ -3,7 +3,7 @@ from tkinter import messagebox
 import datetime
 import pika
 import threading
-import json  # Importante para enviar dados estruturados (nome + mensagem)
+import json
 
 # --- Configurações Visuais ---
 ctk.set_appearance_mode("Dark")
@@ -24,42 +24,35 @@ class ChatApp(ctk.CTk):
         self.title("Mensageiro")
         self.geometry("900x600")
         
-        # Layout de Grid (2 colunas)
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
-        # ================= SIDEBAR (Barra Lateral) =================
+        # ================= SIDEBAR =================
         self.sidebar_frame = ctk.CTkFrame(self, width=220, corner_radius=0)
         self.sidebar_frame.grid(row=0, column=0, rowspan=2, sticky="nsew")
         self.sidebar_frame.grid_rowconfigure(6, weight=1)
 
-        # Título
         self.logo_label = ctk.CTkLabel(self.sidebar_frame, text="Painel de Controle", font=ctk.CTkFont(size=20, weight="bold"))
         self.logo_label.grid(row=0, column=0, padx=20, pady=(20, 10))
 
-        # 1. Identidade (Quem sou eu?)
         self.lbl_identity = ctk.CTkLabel(self.sidebar_frame, text="Seu Nome", anchor="w")
         self.lbl_identity.grid(row=1, column=0, padx=20, pady=(10, 0), sticky="w")
 
         self.entry_identity = ctk.CTkEntry(self.sidebar_frame, placeholder_text="Ex: Fulano")
         self.entry_identity.grid(row=2, column=0, padx=20, pady=(5, 10))
 
-        # 2. Status e Conexão
         self.status_label = ctk.CTkLabel(self.sidebar_frame, text="Status: OFFLINE", text_color="red", font=ctk.CTkFont(weight="bold"))
         self.status_label.grid(row=3, column=0, padx=20, pady=(10, 0))
 
         self.btn_connect = ctk.CTkButton(self.sidebar_frame, text="Conectar", command=self.toggle_connection)
         self.btn_connect.grid(row=4, column=0, padx=20, pady=10)
 
-        # Separador visual
         self.separator = ctk.CTkLabel(self.sidebar_frame, text="-------------------", text_color="gray")
         self.separator.grid(row=5, column=0, pady=5)
 
-        # 3. Seleção de Destinatário
         self.lbl_dest = ctk.CTkLabel(self.sidebar_frame, text="Enviar para:", anchor="w")
         self.lbl_dest.grid(row=6, column=0, padx=20, pady=(10, 0), sticky="n")
         
-        # Lista inicial (pode ser vazia ou ter padrões)
         self.users_list_dropdown = [] 
         self.user_dropdown = ctk.CTkOptionMenu(self.sidebar_frame, values=self.users_list_dropdown)
         self.user_dropdown.grid(row=7, column=0, padx=20, pady=(5, 10), sticky="n")
@@ -69,13 +62,11 @@ class ChatApp(ctk.CTk):
                                           command=self.add_new_user_dialog)
         self.btn_add_user.grid(row=8, column=0, padx=20, pady=(0, 20), sticky="n")
 
-        # ================= ÁREA DO CHAT (Direita) =================
-        # Display das mensagens
+        # ================= ÁREA DO CHAT =================
         self.chat_display = ctk.CTkTextbox(self, width=250)
         self.chat_display.grid(row=0, column=1, padx=(20, 20), pady=(20, 0), sticky="nsew")
-        self.chat_display.configure(state="disabled") # Bloqueado para edição manual
+        self.chat_display.configure(state="disabled")
 
-        # Área de Input (Campo de texto + Botão)
         self.input_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.input_frame.grid(row=1, column=1, padx=20, pady=20, sticky="ew")
         self.input_frame.grid_columnconfigure(0, weight=1)
@@ -83,7 +74,6 @@ class ChatApp(ctk.CTk):
         self.entry_msg = ctk.CTkEntry(self.input_frame, placeholder_text="Conecte-se para iniciar...")
         self.entry_msg.grid(row=0, column=0, padx=(0, 20), sticky="ew")
         
-        # Bind da tecla ENTER
         self.entry_msg.bind("<Return>", self.send_message)
         self.entry_msg.configure(state="disabled")
 
@@ -94,11 +84,10 @@ class ChatApp(ctk.CTk):
     # ================= LÓGICA DO SISTEMA =================
 
     def verificar_existencia_real(self, queue_name):
-        """Verifica se a fila existe no RabbitMQ sem derrubar a conexão principal"""
         if not self.is_connected: return False
         try:
             temp_channel = self.connection.channel()
-            # passive=True lança erro se a fila não existir
+            # Verifica passivamente (não cria, só checa)
             temp_channel.queue_declare(queue=queue_name, passive=True)
             temp_channel.close()
             return True
@@ -106,40 +95,42 @@ class ChatApp(ctk.CTk):
             return False
 
     def start_listening(self, my_queue):
-        """Thread que fica ouvindo mensagens chegando"""
+        """Thread que consome mensagens da fila DURÁVEL"""
         try:
-            # Conexão exclusiva para a thread de consumo
             connection = pika.BlockingConnection(pika.ConnectionParameters('localhost'))
             channel = connection.channel()
-            channel.queue_declare(queue=my_queue)
+            
+            # [MODIFICAÇÃO 1] Fila Durable=True
+            channel.queue_declare(queue=my_queue, durable=True)
 
             def callback(ch, method, properties, body):
                 if self.stop_thread:
+                    ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
                     channel.stop_consuming()
+                    return
                 
-                # --- LÓGICA DE RECEBIMENTO JSON ---
                 try:
-                    # Tenta ler como JSON para pegar o nome do remetente
                     msg_data = json.loads(body.decode())
                     sender_name = msg_data.get("sender", "Desconhecido")
                     text_content = msg_data.get("content", "")
-                    
                     display_text = f"{sender_name}: {text_content}"
                 except json.JSONDecodeError:
-                    # Fallback para mensagens antigas (texto puro)
                     display_text = f"Recebido: {body.decode()}"
                 
-                # Atualiza a UI de forma segura
                 self.after(0, lambda: self.log_to_chat_received(display_text))
 
-            channel.basic_consume(queue=my_queue, on_message_callback=callback, auto_ack=True)
+                # [MODIFICAÇÃO 2] Confirmação manual (ACK)
+                # Garante que a mensagem só saia da fila após ser processada
+                ch.basic_ack(delivery_tag=method.delivery_tag)
+
+            # auto_ack=False para usarmos a confirmação manual acima
+            channel.basic_consume(queue=my_queue, on_message_callback=callback, auto_ack=False)
             channel.start_consuming()
 
         except Exception as e:
             print(f"Erro na thread: {e}")
 
     def toggle_connection(self):
-        """Liga/Desliga a conexão com RabbitMQ"""
         my_id = self.entry_identity.get().strip()
 
         if not my_id:
@@ -147,25 +138,21 @@ class ChatApp(ctk.CTk):
             return
 
         if not self.is_connected:
-            # === CONECTAR ===
             try:
-                # 1. Conexão Principal (Envio)
                 self.connection = pika.BlockingConnection(pika.ConnectionParameters('localhost'))
                 self.channel = self.connection.channel()
                 
-                # 2. Declara minha fila (para eu poder receber)
-                self.channel.queue_declare(queue=my_id)
+                # [MODIFICAÇÃO 3] Declara a PRÓPRIA fila como Durable=True ao conectar
+                self.channel.queue_declare(queue=my_id, durable=True)
                 
-                # 3. Inicia Thread de Recebimento
                 self.stop_thread = False
                 self.consume_thread = threading.Thread(target=self.start_listening, args=(my_id,))
                 self.consume_thread.daemon = True
                 self.consume_thread.start()
 
-                # Atualiza UI
                 self.is_connected = True
-                self.status_label.configure(text="Status: ONLINE", text_color="#2CC985") # Verde Neon
-                self.btn_connect.configure(text="Desconectar", fg_color="#C0392B", hover_color="#E74C3C") # Vermelho
+                self.status_label.configure(text="Status: ONLINE", text_color="#2CC985")
+                self.btn_connect.configure(text="Desconectar", fg_color="#C0392B", hover_color="#E74C3C")
                 self.entry_identity.configure(state="disabled")
                 self.entry_msg.configure(state="normal", placeholder_text=f"Mensagem de {my_id}...")
                 self.btn_send.configure(state="normal")
@@ -173,10 +160,9 @@ class ChatApp(ctk.CTk):
                 self.log_to_chat_system(f"Conectado como: {my_id}")
 
             except Exception as e:
-                messagebox.showerror("Erro de Conexão", f"Não foi possível conectar ao RabbitMQ.\n{e}")
+                messagebox.showerror("Erro de Conexão", f"Não foi possível conectar ao servidor.\n{e}")
 
         else:
-            # === DESCONECTAR ===
             self.stop_thread = True
             if self.connection and not self.connection.is_closed:
                 self.connection.close()
@@ -187,11 +173,9 @@ class ChatApp(ctk.CTk):
             self.entry_identity.configure(state="normal")
             self.entry_msg.configure(state="disabled", placeholder_text="Conecte-se para iniciar...")
             self.btn_send.configure(state="disabled")
-            
             self.log_to_chat_system("Desconectado.")
 
     def add_new_user_dialog(self):
-        """Adiciona novo usuário verificando se ele existe na rede"""
         if not self.is_connected:
             messagebox.showerror("Erro", "Conecte-se primeiro para buscar usuários.")
             return
@@ -200,6 +184,7 @@ class ChatApp(ctk.CTk):
         new_user = dialog.get_input()
         
         if new_user:
+            # Verifica se a fila existe (agora busca por filas duráveis também)
             existe = self.verificar_existencia_real(new_user)
             if existe:
                 if new_user not in self.users_list_dropdown:
@@ -210,13 +195,12 @@ class ChatApp(ctk.CTk):
                 else:
                     messagebox.showinfo("Info", "Usuário já está na lista.")
             else:
-                messagebox.showerror("Não encontrado", f"O usuário '{new_user}' não existe no servidor.\nPeça para ele se conectar primeiro.")
+                messagebox.showerror("Não encontrado", f"O usuário '{new_user}' não tem uma fila criada no servidor.")
 
     def send_message_event(self):
         self.send_message(None)
 
     def send_message(self, event):
-        """Envia mensagem empacotada em JSON"""
         if not self.is_connected: return
 
         message = self.entry_msg.get()
@@ -225,26 +209,27 @@ class ChatApp(ctk.CTk):
         
         if message:
             try:
-                # --- ENVIO COM JSON ---
                 payload = {
                     "sender": my_id,
                     "content": message
                 }
                 
-                self.channel.basic_publish(exchange='',
-                                           routing_key=target_queue,
-                                           body=json.dumps(payload)) # Empacota
+                # [MODIFICAÇÃO 4] Mensagem Persistente (delivery_mode=2)
+                self.channel.basic_publish(
+                    exchange='',
+                    routing_key=target_queue,
+                    body=json.dumps(payload),
+                    properties=pika.BasicProperties(
+                        delivery_mode=2,  # Salva no disco
+                    )
+                )
                 
-                # Log Visual (Eu -> Destino)
                 self.log_to_chat_system(f"Eu -> {target_queue}: {message}")
                 self.entry_msg.delete(0, "end")
             except Exception as e:
                 self.log_to_chat_system(f"ERRO ao enviar: {e}")
 
-    # --- Funções Auxiliares de Log ---
-    
     def log_to_chat_received(self, text):
-        """Log para mensagens recebidas (já formatadas com nome)"""
         timestamp = datetime.datetime.now().strftime("%H:%M:%S")
         self.chat_display.configure(state="normal")
         self.chat_display.insert("end", f"[{timestamp}] {text}\n")
@@ -252,7 +237,6 @@ class ChatApp(ctk.CTk):
         self.chat_display.configure(state="disabled")
 
     def log_to_chat_system(self, text):
-        """Log para mensagens do sistema ou envio próprio"""
         timestamp = datetime.datetime.now().strftime("%H:%M:%S")
         self.chat_display.configure(state="normal")
         self.chat_display.insert("end", f"[{timestamp}] {text}\n")
