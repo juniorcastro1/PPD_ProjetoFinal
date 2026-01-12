@@ -21,7 +21,7 @@ class ChatApp(ctk.CTk):
         self.stop_thread = False
 
         # Configuração da Janela Principal
-        self.title("RabbitMQ Chat - Final Version")
+        self.title("Mensageiro")
         self.geometry("900x600")
         
         # Layout de Grid (2 colunas)
@@ -38,10 +38,10 @@ class ChatApp(ctk.CTk):
         self.logo_label.grid(row=0, column=0, padx=20, pady=(20, 10))
 
         # 1. Identidade (Quem sou eu?)
-        self.lbl_identity = ctk.CTkLabel(self.sidebar_frame, text="Seu Nome/Fila:", anchor="w")
+        self.lbl_identity = ctk.CTkLabel(self.sidebar_frame, text="Seu Nome", anchor="w")
         self.lbl_identity.grid(row=1, column=0, padx=20, pady=(10, 0), sticky="w")
 
-        self.entry_identity = ctk.CTkEntry(self.sidebar_frame, placeholder_text="Ex: junior")
+        self.entry_identity = ctk.CTkEntry(self.sidebar_frame, placeholder_text="Ex: Fulano")
         self.entry_identity.grid(row=2, column=0, padx=20, pady=(5, 10))
 
         # 2. Status e Conexão
@@ -60,7 +60,7 @@ class ChatApp(ctk.CTk):
         self.lbl_dest.grid(row=6, column=0, padx=20, pady=(10, 0), sticky="n")
         
         # Lista inicial (pode ser vazia ou ter padrões)
-        self.users_list_dropdown = ["dashboard", "leitor"] 
+        self.users_list_dropdown = [] 
         self.user_dropdown = ctk.CTkOptionMenu(self.sidebar_frame, values=self.users_list_dropdown)
         self.user_dropdown.grid(row=7, column=0, padx=20, pady=(5, 10), sticky="n")
 
@@ -143,7 +143,7 @@ class ChatApp(ctk.CTk):
         my_id = self.entry_identity.get().strip()
 
         if not my_id:
-            messagebox.showwarning("Atenção", "Por favor, defina seu Nome/Fila antes de conectar.")
+            messagebox.showwarning("Atenção", "Por favor, defina seu nome antes de conectar.")
             return
 
         if not self.is_connected:
@@ -196,7 +196,7 @@ class ChatApp(ctk.CTk):
             messagebox.showerror("Erro", "Conecte-se primeiro para buscar usuários.")
             return
 
-        dialog = ctk.CTkInputDialog(text="Nome exato da fila/usuário:", title="Adicionar Contato")
+        dialog = ctk.CTkInputDialog(text="Nome exato do usuário:", title="Adicionar Contato")
         new_user = dialog.get_input()
         
         if new_user:
@@ -210,7 +210,7 @@ class ChatApp(ctk.CTk):
                 else:
                     messagebox.showinfo("Info", "Usuário já está na lista.")
             else:
-                messagebox.showerror("Não encontrado", f"A fila '{new_user}' não existe no RabbitMQ.\nPeça para ele se conectar primeiro.")
+                messagebox.showerror("Não encontrado", f"O usuário '{new_user}' não existe no servidor.\nPeça para ele se conectar primeiro.")
 
     def send_message_event(self):
         self.send_message(None)
